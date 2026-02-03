@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "DeedGuard - Auto-Detect",
+  "version": "6.5",
+  "description": "Detects conflicts AND identifies the owner Deed Number via Secure Backend.",
+  "permissions": ["activeTab", "scripting"],
+  "content_scripts": [
+    {
+      "matches": ["*://enibandhan.bihar.gov.in/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": [
+    "*://enibandhan.bihar.gov.in/*",
+    "https://*.replit.app/*",
+    "http://localhost:5000/*" 
+  ]
+}

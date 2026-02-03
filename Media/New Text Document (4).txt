@@ -1,0 +1,86 @@
+// ==UserScript==
+// @name         Bihar e-Reg: History-Check Automator
+// @namespace    http://tampermonkey.net/
+// @version      12.0
+// @description  Uses a "Completed History" log in localStorage to prevent repeats.
+// @author       Gemini
+// @match        https://enibandhan.bihar.gov.in/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // 1. THE MASTER LIST (Your fixed 55 deeds)
+    const MASTER_DEEDS = [
+       "3953", "6490", "6525", "6855", "7009", "7435", "7505", "7539", "9129", "7329", "6380", "6381", "6382", "6421", "6544", "6473", "6526", "6543", "6572", "6571", "6609", "6665", "6638", "6639", "6663", "6664", "6691", "6692", "6693", "6791", "6792", "6794", "6809", "6853", "6905", "6906", "6907", "6922", "6953", "6924", "6954", "6982", "7010", "7051", "7052", "7054", "7274", "7275", "7328", "7331", "7332", "7371", "7394", "7397", "7436", "7439", "7696", "7694", "7724", "7695", "7725", "7759", "7760", "7761", "7804", "7843", "7803", "7842", "7885", "7887", "7969", "8018", "8062", "8063", "8064", "8110", "8109", "8160", "8111", "8278", "9151", "7503", "7504", "7538"
+
+    ];
+
+    // 2. GET HISTORY FROM STORAGE
+    let completedHistory = JSON.parse(localStorage.getItem('COMPLETED_DEEDS_LOG') || "[]");
+
+    // 3. FIND THE FIRST DEED THAT IS NOT IN HISTORY
+    const currentDeed = MASTER_DEEDS.find(deed => !completedHistory.includes(deed));
+
+    // 4. HUMAN TYPING FUNCTION
+    function humanType(element, value) {
+        if (!element) return;
+        element.focus();
+        element.value = value;
+        element.dispatchEvent(new Event('input', { bubbles: true }));
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+
+        // Mimic Enter Key
+        const enter = { key: 'Enter', keyCode: 13, which: 13, bubbles: true };
+        element.dispatchEvent(new KeyboardEvent('keydown', enter));
+        console.log("Human-Mimic: Typed " + value);
+    }
+
+    // 5. MARK AS COMPLETED (Triggered by Fetch click)
+    function markAsDone() {
+        if (currentDeed && !completedHistory.includes(currentDeed)) {
+            completedHistory.push(currentDeed);
+            localStorage.setItem('COMPLETED_DEEDS_LOG', JSON.stringify(completedHistory));
+            console.log("HISTORY UPDATED: " + currentDeed + " is now marked as DONE.");
+        }
+    }
+
+    // 6. MAIN LOGIC
+    function start() {
+        if (!currentDeed) {
+            console.log("ALL DEEDS FROM MASTER LIST ARE COMPLETED.");
+            return;
+        }
+
+        console.log("Current Task: " + currentDeed);
+
+        // Step A: Set Status to Completed
+        const status = document.getElementById('deed_status');
+        if (status) {
+            status.value = "P";
+            status.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+
+        // Step B: Type the Deed Number
+        const deedInput = document.getElementById('doctNo') || document.querySelector('input[placeholder*="Deed"]');
+        if (deedInput) {
+            setTimeout(() => {
+                humanType(deedInput, currentDeed);
+            }, 1000);
+        }
+
+        // Step C: Listen for FETCH click to save progress immediately
+        const fetchBtn = document.getElementById('fetchbtn');
+        if (fetchBtn) {
+            // We use 'mousedown' because it is faster and happens before the page can refresh
+            fetchBtn.addEventListener('mousedown', markAsDone);
+        }
+    }
+
+    // Initialize after page load
+    window.addEventListener('load', () => {
+        setTimeout(start, 1500);
+    });
+
+})();

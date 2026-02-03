@@ -1,0 +1,91 @@
+// ==UserScript==
+// @name         CSS-Ghost Labeler - Numbers Only
+// @namespace    http://tampermonkey.net/
+// @version      1.2
+// @description  Targets specific suggestion LIs with numeric-only ghost labels.
+// @author       User
+// @match        https://enibandhan.bihar.gov.in/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // 1. Precise Styling
+    const style = document.createElement('style');
+    style.innerHTML = `
+        /* Target ONLY the LI to prevent double-labeling containers */
+        li.list-group-item.labeled-slot {
+            position: relative !important;
+            padding-left: 45px !important;
+        }
+        li.list-group-item.labeled-slot::before {
+            content: attr(data-slot);
+            position: absolute;
+            left: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: #e74c3c;
+            color: white;
+            font-weight: bold;
+            font-size: 13px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            z-index: 99;
+            pointer-events: none;
+        }
+    `;
+    document.head.appendChild(style);
+
+    // 2. The Labeling Engine
+    const applyLabels = () => {
+        // Targeted selector based on your screenshot IDs
+        const items = document.querySelectorAll('#prop_circle_suggestions li, #prop_village_suggestions li');
+
+        items.forEach((item, index) => {
+            // SKIP the 1st spot (index 0)
+            if (index === 0) {
+                item.classList.remove('labeled-slot');
+                return;
+            }
+
+            if (item.classList.contains('labeled-slot')) return;
+
+            // Numbers only: Index 1 becomes Label "1", Index 2 becomes Label "2", etc.
+            const slotValue = index.toString();
+
+            item.setAttribute('data-slot', slotValue);
+            item.classList.add('labeled-slot');
+        });
+    };
+
+    const observer = new MutationObserver(applyLabels);
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    // 3. The Selection Logic
+    window.addEventListener('keydown', (e) => {
+        if (!e.altKey) return;
+
+        const key = e.key;
+        // Only trigger for numbers 1-9
+        if (key >= '1' && key <= '9') {
+            const targetIndex = parseInt(key);
+            const items = document.querySelectorAll('#prop_circle_suggestions li, #prop_village_suggestions li');
+            const target = items[targetIndex];
+
+            if (target) {
+                e.preventDefault();
+
+                // Trigger selection
+                target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+                target.click();
+
+                // Maintenance focus on the input
+                const input = document.querySelector('#prop_village') || document.activeElement;
+                if (input) {
+                    setTimeout(() => input.focus(), 10);
+                }
+            }
+        }
+    }, true);
+})();

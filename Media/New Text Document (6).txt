@@ -1,0 +1,166 @@
+// ==UserScript==
+// @name         eNibandhan Cloud Sync (Google Sheets Edition)
+// @namespace    https://enibandhan.bihar.gov.in/
+// @version      3.0.0
+// @description  Captures deeds, saves to local storage queue, and syncs to Google Sheets
+// @match        https://enibandhan.bihar.gov.in/*
+// @grant        GM_xmlhttpRequest
+// @connect      script.google.com
+// @connect      script.googleusercontent.com
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    /* ===============================
+       CONFIG: PASTE YOUR URL & KEY HERE
+       =============================== */
+    const CONFIG = {
+        CLOUD_URL: "https://script.google.com/macros/s/AKfycby50zkSfGBeeQQrRCVyl21giA-7oL0YlJtYJWusH1cjhJojdK4r0OFEAeqfL7jDCUEP/exec", // 🔴 Paste URL here
+        SECRET_KEY: "MyPrivateDeedScanner2026",      // Must match Google Script
+        MACHINE_ID: "PC-01x",
+        OPERATOR: "Saurav"
+    };
+
+    const TARGET_URL = "/digitization/meta-data/v1/request/create";
+
+    /* ===============================
+       STORAGE HELPERS
+       =============================== */
+    const K = {
+        STORE: "EN_DEED_STORE",   // Permanent local backup
+        QUEUE: "EN_UPLOAD_QUEUE", // Items waiting for cloud
+        LOG: "EN_UPLOAD_LOG"      // History of successes/fails
+    };
+
+    const today = () => new Date().toISOString().slice(0, 10);
+    const load = k => JSON.parse(localStorage.getItem(k) || "{}");
+    const save = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+    const uid = p => `${p.volume_year}_${p.volume_no}_${p.doct_no}`;
+
+    function logEntry(e) {
+        const l = JSON.parse(localStorage.getItem(K.LOG) || "[]");
+        l.push({ ...e, time: new Date().toISOString() });
+        localStorage.setItem(K.LOG, JSON.stringify(l.slice(-100))); // Keep last 100
+    }
+
+    /* ===============================
+       CLOUD SYNC ENGINE
+       =============================== */
+    function syncDeed(item) {
+        // Prepare payload with the Secret Key
+        const payload = {
+            ...item.payload,
+            my_key: CONFIG.SECRET_KEY,
+            meta_machine: CONFIG.MACHINE_ID,
+            meta_operator: CONFIG.OPERATOR
+        };
+
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: CONFIG.CLOUD_URL,
+            headers: { "Content-Type": "application/json" },
+            data: JSON.stringify(payload),
+            onload(res) {
+                if (res.status === 200 && (res.responseText.includes("SAVED") || res.responseText.includes("EXISTS"))) {
+                    // Success: Remove from Queue
+                    const q = load(K.QUEUE);
+                    delete q[item.uid];
+                    save(K.QUEUE, q);
+
+                    logEntry({ uid: item.uid, status: "CLOUD_SYNCED" });
+                    console.log("☁️ Cloud Sync Success:", item.uid);
+                } else {
+                    logEntry({ uid: item.uid, status: "CLOUD_FAIL", detail: res.status });
+                }
+            },
+            onerror() {
+                logEntry({ uid: item.uid, status: "NETWORK_ERROR" });
+            }
+        });
+    }
+
+    // Background Process: Retry every 30 seconds for items stuck in queue
+    setInterval(() => {
+        const q = load(K.QUEUE);
+        const items = Object.values(q);
+        if (items.length > 0) {
+            console.log(`🔄 Retrying sync for ${items.length} items...`);
+            items.forEach(syncDeed);
+        }
+    }, 30000);
+
+    /* ===============================
+       XHR INTERCEPT (SAME AS ORIGINAL)
+       =============================== */
+    const o = XMLHttpRequest.prototype.open;
+    const s = XMLHttpRequest.prototype.send;
+
+    XMLHttpRequest.prototype.open = function (m, u) {
+        this._m = m;
+        this._u = u;
+        return o.apply(this, arguments);
+    };
+
+    XMLHttpRequest.prototype.send = function (b) {
+        this._b = b;
+        this.addEventListener("load", () => {
+            if (
+                this._m === "POST" &&
+                this._u?.includes(TARGET_URL) &&
+                this.status >= 200 &&
+                this.status < 300
+            ) {
+                try {
+                    const p = JSON.parse(this._b || "{}");
+                    if (!p.volume_year) return;
+
+                    const id = uid(p);
+                    const item = { uid: id, day: today(), payload: p };
+
+                    // 1. Save to Permanent Local Store
+                    const store = load(K.STORE);
+                    store[id] = item;
+                    save(K.STORE, store);
+
+                    // 2. Add to Queue
+                    const q = load(K.QUEUE);
+                    q[id] = item;
+                    save(K.QUEUE, q);
+
+                    // 3. Trigger immediate sync
+                    syncDeed(item);
+
+                    console.log("✅ Deed Captured & Queued:", id);
+                } catch (err) {
+                    console.error("❌ Capture Error:", err);
+                }
+            }
+        });
+        return s.apply(this, arguments);
+    };
+
+    /* ===============================
+       HOTKEYS
+       =============================== */
+    document.addEventListener("keydown", e => {
+        // Ctrl+Shift+L: View Sync Logs
+        if (e.ctrlKey && e.shiftKey && e.key === "L") {
+            console.table(JSON.parse(localStorage.getItem(K.LOG) || "[]"));
+        }
+        // Ctrl+Shift+Q: View Queue (Waiting to be saved)
+        if (e.ctrlKey && e.shiftKey && e.key === "Q") {
+            console.table(Object.values(load(K.QUEUE)));
+        }
+        // Ctrl+Shift+D: Emergency Download Backup
+        if (e.ctrlKey && e.shiftKey && e.key === "D") {
+            const data = load(K.STORE);
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = `deeds_backup_${today()}.json`;
+            a.click();
+        }
+    });
+
+})();

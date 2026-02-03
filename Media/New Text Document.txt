@@ -1,0 +1,172 @@
+// ==UserScript==
+// @name         Bihar Deed Navigator Pro (Alt Key Master)
+// @namespace    http://tampermonkey.net/
+// @version      3.0
+// @description  Complete control: Zoom, Scroll, Rotate, and Jump with Keyboard Shortcuts.
+// @author       Gemini Helper
+// @match        https://enibandhan.bihar.gov.in/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // CONFIGURATION: Your specific screen coordinates
+    const TARGET_X = 554;
+    const TARGET_Y = 662;
+    const SCROLL_SPEED = 250; // Pixels to move per keypress
+
+    // STATE VARIABLES
+    let currentZoom = 1.0;
+    let currentRotation = 0;
+
+    // 1. CREATE A VISUAL INDICATOR (HUD)
+    // This small box shows you the current Zoom/Rotation status
+    const hud = document.createElement('div');
+    Object.assign(hud.style, {
+        position: 'fixed',
+        bottom: '20px',
+        right: '20px',
+        background: 'rgba(0, 0, 0, 0.8)',
+        color: '#00ff00',
+        padding: '10px 15px',
+        borderRadius: '5px',
+        fontSize: '14px',
+        fontFamily: 'monospace',
+        zIndex: '999999',
+        pointerEvents: 'none',
+        border: '1px solid #00ff00',
+        display: 'none' // Hidden until active
+    });
+    document.body.appendChild(hud);
+
+    function updateHUD() {
+        hud.style.display = 'block';
+        hud.innerText = `ZOOM: ${Math.round(currentZoom * 100)}% | ROT: ${currentRotation}°`;
+        // Auto-hide after 3 seconds
+        clearTimeout(window.hudTimer);
+        window.hudTimer = setTimeout(() => { hud.style.display = 'none'; }, 3000);
+    }
+
+    // 2. HELPER TO FIND THE VIEWER
+    function getViewer() {
+        let el = document.elementFromPoint(TARGET_X, TARGET_Y);
+        // Climb up until we find the scrollable container
+        while (el && el.scrollHeight <= el.clientHeight && el.tagName !== 'BODY') {
+            el = el.parentElement;
+        }
+        return el;
+    }
+
+    // 3. MAIN KEYBOARD LISTENER
+    window.addEventListener('keydown', (e) => {
+        // Only run if ALT is pressed
+        if (!e.altKey) return;
+
+        const viewer = getViewer();
+        if (!viewer) return;
+
+        // --- SCROLLING (Alt + Arrows) ---
+        if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            viewer.scrollBy({ top: -SCROLL_SPEED, behavior: 'smooth' });
+        }
+        else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            viewer.scrollBy({ top: SCROLL_SPEED, behavior: 'smooth' });
+        }
+        else if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            viewer.scrollBy({ left: -SCROLL_SPEED, behavior: 'smooth' });
+        }
+        else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            viewer.scrollBy({ left: SCROLL_SPEED, behavior: 'smooth' });
+        }
+
+        // --- PAGE JUMPS (Alt + T / Alt + L) ---
+        else if (e.key.toLowerCase() === 't') { // Top
+            e.preventDefault();
+            viewer.scrollTo({ top: 0, behavior: 'smooth' });
+            updateHUD();
+        }
+        else if (e.key.toLowerCase() === 'l') { // Last / Bottom
+            e.preventDefault();
+            viewer.scrollTo({ top: viewer.scrollHeight, behavior: 'smooth' });
+            updateHUD();
+        }
+
+        // --- ROTATION (Alt + R) ---
+        else if (e.key.toLowerCase() === 'r') {
+            e.preventDefault();
+
+            // Try 1: Look for the actual "Rotate" button on the site first
+            // We look for buttons with specific icons/text common in PDF viewers
+            const buttons = document.querySelectorAll('button, .btn, [role="button"]');
+            let foundNativeButton = false;
+
+            for (let btn of buttons) {
+                // Check if button text or title implies rotation
+                if (btn.innerText.includes('Rotate') || btn.title.includes('Rotate') || btn.innerHTML.includes('fa-rotate')) {
+                    btn.click();
+                    foundNativeButton = true;
+                    console.log("Clicked Native Rotate Button");
+                    break;
+                }
+            }
+
+            // Try 2: If no button found, force CSS rotation
+            if (!foundNativeButton) {
+                currentRotation = (currentRotation + 90) % 360;
+                applyTransform(viewer);
+            }
+            updateHUD();
+        }
+
+        // --- ZOOM (Alt + "+" / Alt + "-") ---
+        else if (e.key === '=' || e.key === '+') { // Handle both + and = keys
+            e.preventDefault();
+            currentZoom += 0.25; // Increase 25%
+            applyTransform(viewer);
+            updateHUD();
+        }
+        else if (e.key === '-') {
+            e.preventDefault();
+            if (currentZoom > 0.5) currentZoom -= 0.25; // Decrease 25%
+            applyTransform(viewer);
+            updateHUD();
+        }
+
+        // --- RESET (Alt + 0) ---
+        else if (e.key === '0') {
+            e.preventDefault();
+            currentZoom = 1.0;
+            currentRotation = 0;
+            applyTransform(viewer);
+            updateHUD();
+        }
+    });
+
+    // 4. APPLY TRANSFORM HELPER
+    // This applies the Zoom and Rotation safely
+    function applyTransform(element) {
+        // We target the *content* inside the viewer, usually the first child
+        // If we rotate the viewer itself, scrollbars get messed up.
+        let content = element.firstElementChild;
+        if (!content) content = element;
+
+        content.style.transition = 'transform 0.2s ease';
+        content.style.transformOrigin = 'top center'; // pivot point
+        content.style.transform = `scale(${currentZoom}) rotate(${currentRotation}deg)`;
+
+        // Fix for rotation mess:
+        // If rotated 90/270, we might need to adjust margins so it doesn't clip.
+        if (currentRotation % 180 !== 0) {
+            content.style.margin = '50px'; // Add breathing room
+        } else {
+            content.style.margin = '0';
+        }
+    }
+
+    console.log("✅ Bihar Navigator Loaded: Alt+Arrows, Alt+T/L, Alt+R, Alt+/-");
+})();

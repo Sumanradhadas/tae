@@ -1,0 +1,156 @@
+// ==UserScript==
+// @name         Bihar Deed Navigator Pro (Ultimate Edition)
+// @namespace    http://tampermonkey.net/
+// @version      4.0
+// @description  Zoom, Scroll, Rotate, and Select Dropdowns with Keyboard Shortcuts.
+// @author       Gemini Helper
+// @match        https://enibandhan.bihar.gov.in/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // --- CONFIGURATION ---
+    const TARGET_X = 554;
+    const TARGET_Y = 662;
+    const SCROLL_SPEED = 250;
+
+    // --- STATE ---
+    let currentZoom = 1.0;
+    let currentRotation = 0;
+    let visibleListItems = []; // Stores the current dropdown options
+
+    // 1. HUD (Heads Up Display)
+    const hud = document.createElement('div');
+    Object.assign(hud.style, {
+        position: 'fixed', bottom: '20px', right: '20px',
+        background: 'rgba(0, 0, 0, 0.9)', color: '#00ff00',
+        padding: '10px 15px', borderRadius: '5px',
+        fontSize: '14px', fontFamily: 'monospace',
+        zIndex: '999999', pointerEvents: 'none',
+        border: '1px solid #00ff00', display: 'none'
+    });
+    document.body.appendChild(hud);
+
+    function showHUD(text) {
+        hud.style.display = 'block';
+        hud.innerText = text;
+        clearTimeout(window.hudTimer);
+        window.hudTimer = setTimeout(() => { hud.style.display = 'none'; }, 3000);
+    }
+
+    // 2. DROPDOWN NUMBERING SYSTEM
+    // We watch the screen for when a dropdown list appears
+    const observer = new MutationObserver((mutations) => {
+        // Look for common dropdown classes used in these portals
+        const listItems = document.querySelectorAll('.ui-menu-item, .dropdown-item, li[role="option"]');
+
+        if (listItems.length > 0 && listItems.length !== visibleListItems.length) {
+            visibleListItems = listItems;
+            labelDropdownItems(listItems);
+        } else if (listItems.length === 0) {
+            visibleListItems = [];
+        }
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    function labelDropdownItems(items) {
+        // Only label the first 9 items
+        items.forEach((item, index) => {
+            if (index >= 9) return;
+
+            // Check if we already labeled it to avoid duplicates
+            if (item.querySelector('.nav-hint')) return;
+
+            const hint = document.createElement('span');
+            hint.className = 'nav-hint';
+            hint.innerText = `[Alt+${index + 1}] `;
+            Object.assign(hint.style, {
+                backgroundColor: '#ff0000', color: 'white',
+                fontSize: '11px', fontWeight: 'bold',
+                padding: '2px 4px', borderRadius: '3px',
+                marginRight: '5px', verticalAlign: 'middle'
+            });
+
+            // Insert the number at the start of the text
+            if(item.firstChild) {
+                item.insertBefore(hint, item.firstChild);
+            } else {
+                item.appendChild(hint);
+            }
+        });
+    }
+
+    // 3. MAIN KEYBOARD LISTENER
+    window.addEventListener('keydown', (e) => {
+        // --- DROPDOWN SELECTION (Alt + 1-9) ---
+        // This takes priority if a list is visible
+        if (e.altKey && e.key >= '1' && e.key <= '9') {
+            const index = parseInt(e.key) - 1;
+
+            // Check if we have a visible list to select from
+            if (visibleListItems.length > index) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                const itemToClick = visibleListItems[index];
+
+                // Sometimes the click needs to be on the link <a> inside the <li>
+                const link = itemToClick.querySelector('a');
+                if (link) {
+                    link.click();
+                } else {
+                    itemToClick.click();
+                }
+
+                showHUD(`Selected: Option ${e.key}`);
+                return; // Stop here, don't trigger zoom shortcuts
+            }
+        }
+
+        // --- PDF NAVIGATOR (Only if Alt is pressed) ---
+        if (!e.altKey) return;
+
+        // Find the PDF Viewer
+        let viewer = document.elementFromPoint(TARGET_X, TARGET_Y);
+        while (viewer && viewer.scrollHeight <= viewer.clientHeight && viewer.tagName !== 'BODY') {
+            viewer = viewer.parentElement;
+        }
+
+        if (!viewer) return;
+
+        // Shortcuts
+        if (e.key === 'ArrowUp') { e.preventDefault(); viewer.scrollBy({ top: -SCROLL_SPEED, behavior: 'smooth' }); }
+        else if (e.key === 'ArrowDown') { e.preventDefault(); viewer.scrollBy({ top: SCROLL_SPEED, behavior: 'smooth' }); }
+        else if (e.key === 'ArrowLeft') { e.preventDefault(); viewer.scrollBy({ left: -SCROLL_SPEED, behavior: 'smooth' }); }
+        else if (e.key === 'ArrowRight') { e.preventDefault(); viewer.scrollBy({ left: SCROLL_SPEED, behavior: 'smooth' }); }
+
+        else if (e.key.toLowerCase() === 't') { e.preventDefault(); viewer.scrollTo({ top: 0, behavior: 'smooth' }); showHUD('Top of Page'); }
+        else if (e.key.toLowerCase() === 'l') { e.preventDefault(); viewer.scrollTo({ top: viewer.scrollHeight, behavior: 'smooth' }); showHUD('Bottom of Page'); }
+
+        else if (e.key === '=' || e.key === '+') { e.preventDefault(); currentZoom += 0.25; applyTransform(viewer); }
+        else if (e.key === '-') { e.preventDefault(); if (currentZoom > 0.5) currentZoom -= 0.25; applyTransform(viewer); }
+        else if (e.key === '0') { e.preventDefault(); currentZoom = 1.0; currentRotation = 0; applyTransform(viewer); }
+
+        else if (e.key.toLowerCase() === 'r') {
+            e.preventDefault();
+            const btn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('Rotate') || b.title.includes('Rotate'));
+            if (btn) btn.click();
+            else { currentRotation = (currentRotation + 90) % 360; applyTransform(viewer); }
+            showHUD(`Rotated: ${currentRotation}°`);
+        }
+    });
+
+    function applyTransform(element) {
+        let content = element.firstElementChild || element;
+        content.style.transition = 'transform 0.2s ease';
+        content.style.transformOrigin = 'top center';
+        content.style.transform = `scale(${currentZoom}) rotate(${currentRotation}deg)`;
+        content.style.margin = (currentRotation % 180 !== 0) ? '50px' : '0';
+        showHUD(`Zoom: ${Math.round(currentZoom * 100)}%`);
+    }
+
+    console.log("✅ Ultimate Navigator Active: Dropdown Selection + PDF Controls");
+})();

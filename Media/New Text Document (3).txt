@@ -1,0 +1,63 @@
+// ==UserScript==
+// @name         Bihar e-Reg: Enhanced Focus & Shortcuts
+// @namespace    http://tampermonkey.net/
+// @version      1.2
+// @description  Force-focus Fetch button and adds Alt+S (Submit) / Alt+F (Fetch)
+// @author       Gemini
+// @match        https://enibandhan.bihar.gov.in/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    function paintAndFocus() {
+        const fetchBtn = document.getElementById('fetchbtn');
+        const submitBtn = document.getElementById('addVolumeBtn');
+
+        // Target 1: Fetch Details Button
+        if (fetchBtn) {
+            fetchBtn.style.outline = "8px solid #FF00FF";
+            fetchBtn.style.outlineOffset = "-4px";
+
+            // If nothing is focused, or the body has focus, force it to the button
+            if (document.activeElement === document.body || document.activeElement === null) {
+                fetchBtn.focus();
+            }
+        }
+
+        // Target 2: Submit Button
+        if (submitBtn) {
+            submitBtn.style.outline = "8px solid #00FFFF";
+            submitBtn.style.outlineOffset = "-4px";
+        }
+    }
+
+    // Keyboard Shortcuts
+    window.addEventListener('keydown', function(e) {
+        const key = e.key.toLowerCase();
+
+        // Alt + S for Submit
+        if (e.altKey && key === 's') {
+            const submitBtn = document.getElementById('addVolumeBtn');
+            if (submitBtn) {
+                e.preventDefault();
+                submitBtn.click();
+            }
+        }
+
+        // Alt + F for Fetch (Manual shortcut if auto-focus fails)
+        if (e.altKey && key === 'f') {
+            const fetchBtn = document.getElementById('fetchbtn');
+            if (fetchBtn) {
+                e.preventDefault();
+                fetchBtn.focus();
+                // Optional: Uncomment the line below if you want Alt+F to CLICK it too
+                // fetchBtn.click();
+            }
+        }
+    });
+
+    // Run more frequently at start to ensure focus is grabbed
+    setInterval(paintAndFocus, 500);
+})();
