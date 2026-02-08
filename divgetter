@@ -1,0 +1,36 @@
+(function() {
+    const label = document.createElement('div');
+    Object.assign(label.style, {
+        position: 'fixed', top: '10px', left: '10px', padding: '10px',
+        background: 'black', color: 'lime', zIndex: '10000', fontSize: '14px',
+        border: '2px solid lime', pointerEvents: 'none'
+    });
+    document.body.appendChild(label);
+
+    const highlighter = document.createElement('div');
+    Object.assign(highlighter.style, {
+        position: 'fixed', border: '2px solid blue', pointerEvents: 'none',
+        zIndex: '9999', transition: 'all 0.1s'
+    });
+    document.body.appendChild(highlighter);
+
+    document.addEventListener('mousemove', (e) => {
+        const target = e.target;
+        const rect = target.getBoundingClientRect();
+        
+        highlighter.style.width = rect.width + 'px';
+        highlighter.style.height = rect.height + 'px';
+        highlighter.style.top = rect.top + 'px';
+        highlighter.style.left = rect.left + 'px';
+
+        label.innerText = `Tag: ${target.tagName}\nID: ${target.id || 'No ID'}\nClass: ${target.className || 'No Class'}`;
+    });
+
+    document.addEventListener('click', (e) => {
+        e.preventDefault();
+        console.log("YOU CLICKED THE TARGET!");
+        console.log("ID:", e.target.id);
+        console.log("Class:", e.target.className);
+        alert("Target Locked! Check the console (F12) for the ID.");
+    }, {once: true});
+})();
