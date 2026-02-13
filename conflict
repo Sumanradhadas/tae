@@ -1,0 +1,221 @@
+// ==UserScript==
+// @name         Enibandhan Workflow & Conflict Resolver
+// @namespace    http://tampermonkey.net/
+// @version      4.0
+// @description  Now with Progress Bar & 400-Error Triggered Conflict Resolution
+// @author       Gemini
+// @match        https://enibandhan.bihar.gov.in/*
+// @grant        GM_xmlhttpRequest
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @connect      2coruscating-peony-79d473.netlify.app
+// @connect      3eloquent-youtiao-2760e6.netlify.app
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    const CONFIG = {
+        SERVER_SEND: 'https://2coruscating-peony-79d473.netlify.app/.netlify/functions/index-handler',
+        SERVER_CONFLICT: 'https://3eloquent-youtiao-2760e6.netlify.app/.netlify/functions/conflict-proxy',
+        SAVE_URL: '/digitization/meta-data/v1/request/save',
+        SUBMIT_URL: '/digitization/meta-data/v1/request/create',
+        CHECK_INTERVAL: 60000,
+    };
+
+    let isProcessingQueue = false;
+
+    // --- UI: Progress Bar Overlay ---
+    const showProgressBarPopup = (durationSec) => {
+        const overlay = document.createElement('div');
+        overlay.id = "conflict-progress-overlay";
+        overlay.style = `position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 10000;
+                         display: flex; align-items: center; justify-content: center; flex-direction: column;
+                         color: white; font-family: sans-serif; transition: opacity 0.3s;`;
+
+        overlay.innerHTML = `
+            <div style="font-size: 18px; margin-bottom: 20px; letter-spacing: 1px;">CHECKING GITHUB RECORDS...</div>
+            <div style="width: 300px; height: 8px; background: #333; border-radius: 10px; overflow: hidden; border: 1px solid #555;">
+                <div id="pb-fill" style="width: 0%; height: 100%; background: linear-gradient(90deg, #2ecc71, #27ae60); transition: width 0.1s linear;"></div>
+            </div>
+            <div id="pb-text" style="margin-top: 10px; font-size: 12px; color: #aaa;">Please wait while we verify page ranges</div>
+        `;
+        document.body.appendChild(overlay);
+
+        let progress = 0;
+        const step = 100 / (durationSec * 10); // Update every 100ms
+        const interval = setInterval(() => {
+            progress += step;
+            const fill = document.getElementById('pb-fill');
+            if (fill) fill.style.width = Math.min(progress, 100) + "%";
+            if (progress >= 100) clearInterval(interval);
+        }, 100);
+
+        return () => {
+            clearInterval(interval);
+            overlay.style.opacity = '0';
+            setTimeout(() => overlay.remove(), 300);
+        };
+    };
+
+    const showNotice = (msg, type = 'info') => {
+        const div = document.createElement('div');
+        div.style = `position: fixed; top: 10px; right: 10px; z-index: 9999; padding: 10px 15px; border-radius: 4px;
+                     color: white; font-size: 12px; font-weight: bold; background: ${type === 'error' ? '#e74c3c' : '#3498db'};`;
+        div.innerText = msg;
+        document.body.appendChild(div);
+        setTimeout(() => div.remove(), 3000);
+    };
+
+    // --- Conflict Workflow (Local -> Remote) ---
+    async function handleConflictWorkflow() {
+        const uiData = {
+            district: document.getElementById('district_id')?.value,
+            sro: document.getElementById('sro_id')?.value,
+            volYear: document.getElementById('volume_year')?.value || document.getElementById('volume_year')?.innerText,
+            volNo: document.getElementById('volume_no')?.value || document.getElementById('volume_no')?.innerText,
+            bookNo: document.getElementById('book_no')?.value || document.getElementById('book_no')?.innerText,
+            deedNo: document.getElementById('doct_no')?.value || document.getElementById('deed_no')?.value,
+            start: parseInt(document.getElementById('page_from')?.value || document.getElementById('start_page')?.value),
+            end: parseInt(document.getElementById('page_to')?.value || document.getElementById('end_page')?.value)
+        };
+
+        if (!uiData.volNo || isNaN(uiData.start)) return;
+
+        // 1. Instant Local DB Check
+        const localDB = GM_getValue('db_z', []);
+        const localConflicts = localDB.filter(d =>
+            d.volume_year == uiData.volYear &&
+            d.book_no == uiData.bookNo &&
+            d.volume_no == uiData.volNo &&
+            d.deed_no != uiData.deedNo &&
+            (uiData.start <= d.end_page && uiData.end >= d.start_page)
+        );
+
+        if (localConflicts.length > 0) {
+            alert(`⚠️ CONFLICT FOUND (Local):\nDeed Numbers: ${localConflicts.map(c => c.deed_no).join(', ')}`);
+            return;
+        }
+
+        // 2. Remote GitHub Check with Progress Bar
+        const removeLoader = showProgressBarPopup(10); // 10 second animation
+
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: CONFIG.SERVER_CONFLICT,
+            data: JSON.stringify(uiData),
+            headers: { "Content-Type": "application/json" },
+            onload: (res) => {
+                removeLoader();
+                try {
+                    const results = JSON.parse(res.responseText);
+                    if (results.conflicts && results.conflicts.length > 0) {
+                        alert(`⚠️ CONFLICT FOUND (GitHub):\nDeed Nos: ${results.conflicts.join(', ')}`);
+                    } else {
+                        alert("The portal returned an error (400), but no page overlap was found in GitHub. Please check manually.");
+                    }
+                } catch (e) {
+                    alert("Error parsing remote data. Please check manually.");
+                }
+            },
+            onerror: () => {
+                removeLoader();
+                alert("Connection to GitHub Server failed.");
+            }
+        });
+    }
+
+    // --- Interceptor: Catch 200 (Success) and 400 (Conflict) ---
+    const originalOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(method, url) {
+        this.addEventListener('load', function() {
+            if (url.includes(CONFIG.SAVE_URL) || url.includes(CONFIG.SUBMIT_URL)) {
+                if (this.status === 200) {
+                    try {
+                        const resp = JSON.parse(this.responseText);
+                        if (resp.success && resp.data) {
+                            handleSuccessfulCapture(resp.data);
+                        }
+                    } catch (e) {}
+                } else if (this.status === 400) {
+                    // Trigger conflict resolution logic on error
+                    handleConflictWorkflow();
+                }
+            }
+        });
+        originalOpen.apply(this, arguments);
+    };
+
+    function handleSuccessfulCapture(data) {
+        const entry = {
+            district: data.district_id,
+            sro: data.sro_id,
+            volume_year: data.volume_year,
+            volume_no: data.volume_no,
+            book_no: data.book_no,
+            deed_no: data.doct_no,
+            start_page: parseInt(data.start_page),
+            end_page: parseInt(data.end_page),
+            timestamp: new Date().toISOString()
+        };
+
+        let localDB = GM_getValue('db_z', []);
+        // Avoid duplicates in local DB
+        if (!localDB.some(d => d.deed_no === entry.deed_no)) {
+            localDB.push(entry);
+            GM_setValue('db_z', localDB);
+        }
+
+        let queue = GM_getValue('sync_queue', []);
+        queue.push(entry);
+        GM_setValue('sync_queue', queue);
+
+        showNotice(`Captured Deed ${entry.deed_no}`);
+    }
+
+    // --- Sync Logic (After 3 PM) ---
+    async function syncDataToCloud() {
+        if (new Date().getHours() < 15 || isProcessingQueue) return;
+
+        let queue = GM_getValue('sync_queue', []);
+        if (queue.length === 0) return;
+
+        isProcessingQueue = true;
+        for (let i = 0; i < queue.length; i++) {
+            const item = queue[i];
+            try {
+                await new Promise((resolve, reject) => {
+                    GM_xmlhttpRequest({
+                        method: "POST",
+                        url: CONFIG.SERVER_SEND,
+                        data: JSON.stringify({ action: "SYNC_INDEX", records: [item] }),
+                        headers: { "Content-Type": "application/json" },
+                        onload: (res) => res.status === 200 ? resolve() : reject(),
+                        onerror: reject
+                    });
+                });
+                queue.splice(i, 1);
+                GM_setValue('sync_queue', queue);
+                i--;
+                await new Promise(r => setTimeout(r, 2000));
+            } catch (e) { break; }
+        }
+        isProcessingQueue = false;
+    }
+
+    // --- Keyboard & Maintenance ---
+    window.addEventListener('keydown', (e) => {
+        if (e.altKey && e.keyCode === 55) { // Alt + 7 Manual Sync
+            syncDataToCloud();
+            alert(`Sync Triggered. Current Queue: ${GM_getValue('sync_queue', []).length} items.`);
+        }
+        if (e.altKey && e.key === 'x') { // Alt + X Clear Local
+            if(confirm("Clear Local DB Cache?")) {
+                GM_setValue('db_z', []);
+                alert("Local DB Cleared.");
+            }
+        }
+    });
+
+    setInterval(syncDataToCloud, CONFIG.CHECK_INTERVAL);
+})();
