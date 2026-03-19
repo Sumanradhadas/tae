@@ -1,0 +1,130 @@
+(function() {
+    // Keep track of the elements you click
+    const selectedElements = new Set();
+
+    // 1. Hover Information Label (Top Left)
+    const label = document.createElement('div');
+    Object.assign(label.style, {
+        position: 'fixed', top: '10px', left: '10px', padding: '10px',
+        background: 'black', color: 'lime', zIndex: '10000', fontSize: '14px',
+        border: '2px solid lime', pointerEvents: 'none', fontFamily: 'monospace'
+    });
+    document.body.appendChild(label);
+
+    // 2. Hover Highlighter Box
+    const highlighter = document.createElement('div');
+    Object.assign(highlighter.style, {
+        position: 'fixed', border: '2px solid blue', pointerEvents: 'none',
+        zIndex: '9999', transition: 'all 0.1s'
+    });
+    document.body.appendChild(highlighter);
+
+    // 3. Control Panel (Top Right)
+    const controlPanel = document.createElement('div');
+    Object.assign(controlPanel.style, {
+        position: 'fixed', top: '10px', right: '10px', zIndex: '10001', display: 'flex', gap: '5px'
+    });
+    
+    const okBtn = document.createElement('button');
+    okBtn.innerText = 'OK - Copy (0)';
+    Object.assign(okBtn.style, {
+        padding: '10px 15px', background: '#00cc00', color: 'white',
+        border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer'
+    });
+    
+    const cancelBtn = document.createElement('button');
+    cancelBtn.innerText = 'Cancel';
+    Object.assign(cancelBtn.style, {
+        padding: '10px 15px', background: '#cc0000', color: 'white',
+        border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer'
+    });
+
+    controlPanel.appendChild(okBtn);
+    controlPanel.appendChild(cancelBtn);
+    document.body.appendChild(controlPanel);
+
+    // 4. Handle Mouse Movement
+    const onMouseMove = (e) => {
+        // Don't highlight our own UI elements
+        if (label.contains(e.target) || controlPanel.contains(e.target)) return;
+        
+        const target = e.target;
+        const rect = target.getBoundingClientRect();
+        
+        highlighter.style.width = rect.width + 'px';
+        highlighter.style.height = rect.height + 'px';
+        highlighter.style.top = rect.top + 'px';
+        highlighter.style.left = rect.left + 'px';
+
+        label.innerText = `Tag: ${target.tagName}\nID: ${target.id || 'No ID'}\nClass: ${target.className || 'No Class'}`;
+    };
+
+    // 5. Handle Clicking Elements
+    const onClick = (e) => {
+        // Ignore clicks on our UI
+        if (label.contains(e.target) || controlPanel.contains(e.target)) return;
+        
+        e.preventDefault();
+        e.stopPropagation();
+
+        const target = e.target;
+        
+        // Toggle Selection
+        if (selectedElements.has(target)) {
+            selectedElements.delete(target);
+            target.style.outline = target.dataset.oldOutline || '';
+        } else {
+            selectedElements.add(target);
+            target.dataset.oldOutline = target.style.outline;
+            target.style.outline = '3px solid red'; // Highlight selected elements in red
+        }
+        
+        okBtn.innerText = `OK - Copy (${selectedElements.size})`;
+    };
+
+    // 6. Cleanup Function (Removes UI and event listeners)
+    const cleanup = () => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('click', onClick, true);
+        label.remove();
+        highlighter.remove();
+        controlPanel.remove();
+        
+        // Remove the red outlines
+        selectedElements.forEach(el => {
+            el.style.outline = el.dataset.oldOutline || '';
+            delete el.dataset.oldOutline;
+        });
+    };
+
+    // 7. Button Actions
+    okBtn.addEventListener('click', async () => {
+        if (selectedElements.size === 0) {
+            alert("Please click on some elements first!");
+            return;
+        }
+        
+        let combinedContent = '';
+        selectedElements.forEach(el => {
+            // Change 'outerHTML' to 'innerText' if you only want plain text instead of HTML code
+            combinedContent += el.outerHTML + '\n\n------------------------\n\n'; 
+        });
+
+        try {
+            await navigator.clipboard.writeText(combinedContent);
+            console.log("Copied to clipboard:\n", combinedContent);
+            alert(`Successfully copied ${selectedElements.size} element(s) to your clipboard!`);
+            cleanup();
+        } catch (err) {
+            console.error("Clipboard copy failed", err);
+            alert("Failed to copy. Check the F12 console to copy it manually.");
+        }
+    });
+
+    cancelBtn.addEventListener('click', cleanup);
+
+    // 8. Start Listeners (Using capture phase 'true' to override site's default clicks)
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('click', onClick, true);
+
+})();
